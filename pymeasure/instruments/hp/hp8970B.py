@@ -106,24 +106,24 @@ class HP8970B(Instrument):
 
         :returns: String ASCII response of the instrument
         """
-        if (self.adapter == PrologixAdapter):
+        if self.adapter == PrologixAdapter:
             self.ask_prologix("++spoll")
         self.trigger = True
-        if (self.wait_for_srq(timeout, self.DATA_READY)[0] == 0):
+        if self.wait_for_srq(timeout, self.DATA_READY)[0] == 0:
             data = super(HP8970B, self).read()
             # print("read: ",end='')
             # print(data)
         else:
             data = ""
-        if (self.adapter == PrologixAdapter):
+        if self.adapter == PrologixAdapter:
             self.ask_prologix("++spoll")
         # return b"\n".join(self.connection.readlines()).decode()
         data = data.split(',')
-        return (float(data[0]) / 1e6, float(data[1]), float(data[2]))
+        return float(data[0]) / 1e6, float(data[1]), float(data[2])
 
     def set_srq_mask(self, stb_mask=0, estb_mask=0):
         self.write("Q0")  # Disable all
-        if (estb_mask):  # Enable Extended STB if mask set
+        if estb_mask:  # Enable Extended STB if mask set
             stb_mask = stb_mask | 0x80
         self.write("RM" + str(stb_mask) + "EN")  # Enable STB mask
         self.write("RE" + str(estb_mask) + "EN")  # Enable Extended STB mask
@@ -135,16 +135,16 @@ class HP8970B(Instrument):
         while True:
             # print("time: " + str(time.perf_counter() - start_time))
             STB = int(self.adapter.connection.stb)
-            if (STB != 0):
+            if STB != 0:
                 self.dbgprint("")
                 self.dbgprint(STB)
-            if (estb_mask and (STB & 0x80)):
+            if estb_mask and (STB & 0x80):
                 timed_out = 0
                 # print("Extended status")
                 OSTB = self.adapter.binary_values("OS", 0, np.uint8)
-                if (OSTB[1] != 0):
+                if OSTB[1] != 0:
                     self.dbgprint(OSTB)
-                if (OSTB[1] & estb_mask):
+                if OSTB[1] & estb_mask:
                     break
                 else:
                     continue
@@ -160,7 +160,7 @@ class HP8970B(Instrument):
             time.sleep(0.2)
             # self.dbgprint(".", end='')
         print("time taken: " + str(time.perf_counter() - start_time))
-        return (timed_out, STB, OSTB[1])
+        return timed_out, STB, OSTB[1]
 
     def set_float_value(val):
         global aunits
@@ -215,7 +215,7 @@ class HP8970B(Instrument):
         self.isCalibrated = True
 
     def calibrate_step(self, timeout=120):
-        if (self.calibrate_step_started != True):
+        if not self.calibrate_step_started:
             self.calibrate_step_started = True
             self.hold = True
             self.write("H2")
@@ -226,11 +226,11 @@ class HP8970B(Instrument):
         self.dbgprint("returned stb: " + str(stb))
         data = self.read()
         data = data.split(',')
-        if (stb & self.CALIBRATE_COMPLETE):
+        if stb & self.CALIBRATE_COMPLETE:
             self.calibrate_step_started = False
             self.isCalibrated = True
             self.write("M2")  # Switch to calibrated readings
-        return (float(data[0]) / 1e6, float(data[1]), float(data[2]), self.calibrate_step_started)
+        return float(data[0]) / 1e6, float(data[1]), float(data[2]), self.calibrate_step_started
 
     def set_measurement_mode(self, mode):
         mode_command = "E" + str(mode)
