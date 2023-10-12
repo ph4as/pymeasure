@@ -44,15 +44,19 @@ class HP8970B(Instrument):
     FREQ_MAX = 20000  # max of HP8341B
     FINE_TUNE_TIME = 7  # 7 seconds for 1 frequency tune
 
-    DATA_READY = 0x1
-    CALIBRATE_COMPLETE = 0x2
-    FINE_TUNE_NEEDED = 0x2
+    DATA_READY = 0x01
+    CALIBRATE_COMPLETE = 0x02
+    INSTRUMENT_ERROR = 0x20
+    HPIB_ERROR = 0x04
+    FINE_TUNE_NEEDED = 0x02
+    COARSE_TUNE_NEEDED = 0x04
     FINE_TUNE_COMPLETE = 0x10
+    COARSE_TUNE_COMPLETE = 0x08
 
     isTuned = False
     isCalibrated = False
     calibrate_step_started = False
-    DEBUG = False
+    DEBUG = True
 
     def dbgprint(self, *args):
         if self.DEBUG:
@@ -92,6 +96,8 @@ class HP8970B(Instrument):
         """
         self.dbgprint("write: " + command)
         super(HP8970B, self).write(command)
+        STB = int(self.adapter.connection.stb)
+        self.dbgprint("write: STB=" + str(STB))
 
     def read(self):
         """ Reads the response of the instrument until timeout
@@ -109,7 +115,7 @@ class HP8970B(Instrument):
         if self.adapter == PrologixAdapter:
             self.ask_prologix("++spoll")
         self.trigger = True
-        if self.wait_for_srq(timeout, self.DATA_READY)[0] == 0:
+        if self.wait_for_srq(timeout, self.DATA_READY | self.INSTRUMENT_ERROR)[0] == 0:
             data = super(HP8970B, self).read()
             # print("read: ",end='')
             # print(data)
@@ -150,15 +156,15 @@ class HP8970B(Instrument):
                     continue
             if STB & stb_mask:
                 timed_out = 0
-                # print("STB matches mask")
+                print("STB matches mask")
                 # print(self.read())
                 break
             if (time.perf_counter() - start_time) > timeout:
                 timed_out = 1
-                self.dbgprint("")
+                self.dbgprint("wait_for_srq: timeout")
                 break
             time.sleep(0.2)
-            # self.dbgprint(".", end='')
+            # self.dbgprint(".")
         print("time taken: " + str(time.perf_counter() - start_time))
         return timed_out, STB, OSTB[1]
 
@@ -192,10 +198,11 @@ class HP8970B(Instrument):
         return results
 
     def fine_tune(self):
+        self.frequency = self.shadow_frequency_start  # set the frequency already on the start
         timeout = self.FINE_TUNE_TIME * self.frequencies.size + 10  # calculate total time required
         self.set_srq_mask(0, self.FINE_TUNE_COMPLETE)
         # input("Press Enter to continue...")
-        STB = int(self.adapter.connection.stb)  # Clear STB
+        # STB = int(self.adapter.connection.stb)  # Clear STB
         # print(STB)
         # OSTB = nfm.adapter.binary_values("OS", 0, np.uint8)
         # print(OSTB)
@@ -205,8 +212,9 @@ class HP8970B(Instrument):
         self.isTuned = True
 
     def calibrate(self):
+        self.frequency = self.shadow_frequency_start  # set the frequency already on the start
         timeout = 10 + (1.5 + 0.21 * self.smoothing_factor) * self.frequencies.size
-        print("calculated timeout: " + str(timeout))
+        self.dbgprint("calculated timeout: " + str(timeout))
         self.hold = False
         self.set_srq_mask(self.CALIBRATE_COMPLETE)
         self.write("CA")
@@ -282,8 +290,10 @@ class HP8970B(Instrument):
 
     def set_frequency_start(self, x, force=False):
         if force or self.shadow_frequency_start != int(x):
-            self.isTuned = False
-            self.isCalibrated = False
+            if self.isCalibrated or self.isTuned:
+                if int(x) not in self.frequencies:
+                    self.isTuned = False
+                    self.isCalibrated = False
             self.shadow_frequency_start = int(x)
             self.frequency_start = x
 
@@ -297,8 +307,10 @@ class HP8970B(Instrument):
 
     def set_frequency_stop(self, x, force=False):
         if force or self.shadow_frequency_stop != int(x):
-            self.isTuned = False
-            self.isCalibrated = False
+            if self.isCalibrated or self.isTuned:
+                if int(x) not in self.frequencies:
+                    self.isTuned = False
+                    self.isCalibrated = False
             self.shadow_frequency_stop = int(x)
             self.frequency_stop = x
 
@@ -316,7 +328,7 @@ class HP8970B(Instrument):
             self.isCalibrated = False
             self.shadow_frequency_step = int(x)
             self.frequency_step = x
-            self.frequency_incr = x  # keep both the sweep step and the manual incrment in sync
+            self.frequency_incr = x  # keep both the sweep step and the manual increment in sync
 
     frequency_step = Instrument.setting(
         "SS%dMZEN", "Frequency Step",
@@ -380,7 +392,7 @@ class HP8970B(Instrument):
 
     def get_frequency_step(self):
         self.data_output_full = True
-        self.set_srq_mask(self.DATA_READY)
+        self.set_srq_mask(self.DATA_READY | self.INSTRUMENT_ERROR)
         (cur_freq, gain, nf) = self.read_measurement()
         print("current freq: " + str(cur_freq))
         self.write('UP')
